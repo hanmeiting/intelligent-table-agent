@@ -13,5 +13,6 @@ import { DatabaseModule } from '../database/database.module';
     TableExecutorService,
     DataInserterService,
   ],
+  exports: [TableGeneratorService],
 })
 export class TableModule {}

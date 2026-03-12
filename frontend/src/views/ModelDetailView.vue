@@ -55,7 +55,11 @@
               你好，我是智能数据生成助手。请告诉我你想生成什么样的数据？或者上传相关参考图片。
            </div>
            <div v-for="(msg, index) in messages" :key="index" :class="['message', msg.role]">
-             {{ msg.content }}
+             <template v-if="msg.role === 'ai'">
+               <pre v-if="msg.content" style="white-space: pre-wrap; font-family: inherit; margin: 0;">{{ msg.content }}</pre>
+               <div v-if="msg.toolName" class="tool-tag">正在使用：{{ msg.toolName }}</div>
+             </template>
+             <span v-else>{{ msg.content }}</span>
              <div v-if="msg.streaming" class="typing-indicator">...</div>
            </div>
         </div>
@@ -242,17 +246,16 @@ const sendQuery = async () => {
   inputText.value = ''
   isGenerating.value = true
   
-  const aiMsg = { role: 'ai', content: '', streaming: true }
+  const aiMsg = { role: 'ai', content: '', streaming: true, toolName: '' }
   messages.value.push(aiMsg)
   scrollToBottom()
 
-  // 动态构造空行预览
   const tempRow = { isGenerating: true }
   currentModel.value.fields.forEach(f => tempRow[f.prop] = '')
   tableData.value.unshift(tempRow)
 
   try {
-    const response = await fetch('/api/chat/stream', {
+    const response = await fetch('/api/ai/stream', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -265,58 +268,62 @@ const sendQuery = async () => {
 
     const reader = response.body.getReader()
     const decoder = new TextDecoder()
-    let aiContent = ''
-    
+    let streamContent = ''
+
     while (true) {
       const { done, value } = await reader.read()
       if (done) break
-      
-      const chunk = decoder.decode(value, { stream: true })
-      const lines = chunk.split('\n')
-      
+
+      const text = decoder.decode(value, { stream: true })
+      const lines = text.split('\n')
+
       for (const line of lines) {
-        if (line.startsWith('data: ') && line !== 'data: [DONE]') {
-          const char = line.replace('data: ', '')
-          aiContent += char
-          aiMsg.content = aiContent
-          scrollToBottom()
-          
-          try {
-            const partialData = JSON.parse(aiContent + '}')
-            currentModel.value.fields.forEach(f => {
-               if(partialData[f.prop]) tableData.value[0][f.prop] = partialData[f.prop]
-            })
-          } catch (e) {
+        if (!line.startsWith('data: ')) continue
+        const raw = line.replace(/^data: /, '').trim()
+        if (!raw) continue
+        try {
+          const event = JSON.parse(raw)
+          if (event.type === 'tool_call') {
+            aiMsg.toolName = event.toolName || ''
+            scrollToBottom()
+          } else if (event.type === 'tool_stream' && event.toolName === 'generate_row_data' && event.chunk != null) {
+            streamContent += event.chunk
+            aiMsg.content = streamContent
+            scrollToBottom()
+            try {
+              const partial = JSON.parse(streamContent + '}')
+              currentModel.value.fields.forEach(f => {
+                if (partial[f.prop] !== undefined) tableData.value[0][f.prop] = partial[f.prop]
+              })
+            } catch (_) {}
+          } else if (event.type === 'error') {
+            aiMsg.content += '\n[错误] ' + (event.message || '')
+          } else if (event.type === 'done') {
+            aiMsg.streaming = false
           }
-        }
+        } catch (_) {}
       }
     }
-    
+
     aiMsg.streaming = false
-    console.log('aiMsg.content::::', aiMsg.content, tableData.value[0])
     try {
-      const finalData = JSON.parse(aiContent)
-      // tableData.value.push(finalData)
-      // currentModel.value.fields.forEach(f => {
-      //    tableData.value[0][f.prop] = finalData[f.prop] || ''
-      // })
-      finalData.saved = false;
-      for(let key in finalData) {
+      const finalData = JSON.parse(streamContent)
+      finalData.saved = false
+      for (const key of Object.keys(finalData)) {
         tableData.value[0][key] = finalData[key]
       }
       delete tableData.value[0].isGenerating
-      aiMsg.content = "已为您生成以下数据:\n" + JSON.stringify(finalData, null, 2)
+      aiMsg.content = '已为您生成以下数据:\n' + JSON.stringify(finalData, null, 2)
       ElMessage.success('数据生成完毕！')
     } catch (e) {
-      aiMsg.content = "生成完成，但数据解析失败"
+      aiMsg.content = streamContent ? streamContent + '\n[解析失败]' : '生成完成，但数据解析失败'
       delete tableData.value[0].isGenerating
     }
-    
   } catch (error) {
     console.error(error)
-    aiMsg.content = "生成失败，请重试。"
+    aiMsg.content = '生成失败，请重试。'
     aiMsg.streaming = false
-    tableData.value.shift() // 移除预览行
+    tableData.value.shift()
   } finally {
     isGenerating.value = false
   }
@@ -447,6 +454,12 @@ const sendQuery = async () => {
   color: white;
   align-self: flex-end;
   border-bottom-right-radius: 2px;
+}
+
+.tool-tag {
+  font-size: 12px;
+  color: #909399;
+  margin-top: 4px;
 }
 
 .typing-indicator {

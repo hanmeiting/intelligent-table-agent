@@ -48,6 +48,7 @@
            <div v-for="(msg, index) in messages" :key="index" :class="['message', msg.role]">
              <pre v-if="msg.role === 'ai'" style="white-space: pre-wrap; font-family: inherit; margin: 0;">{{ msg.content }}</pre>
              <span v-else>{{ msg.content }}</span>
+             <div v-if="msg.toolName" class="tool-tag">正在使用：{{ msg.toolName }}</div>
              <div v-if="msg.streaming" class="typing-indicator">...</div>
            </div>
         </div>
@@ -120,68 +121,116 @@ const scrollToBottom = async () => {
 
 const sendQuery = async () => {
   if (!inputText.value.trim() || isGenerating.value) return
-  
+
   const userText = inputText.value
   messages.value.push({ role: 'user', content: userText })
   inputText.value = ''
   isGenerating.value = true
-  
-  const aiMsg = { role: 'ai', content: '', streaming: true }
+
+  const aiMsg = { role: 'ai', content: '', streaming: true, toolName: '' }
   messages.value.push(aiMsg)
   scrollToBottom()
 
   try {
-    const response = await fetch('/api/models/generate', {
+    const response = await fetch('/api/ai/stream', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ description: userText })
+      body: JSON.stringify({
+        messages: [{ role: 'user', content: userText }]
+      })
     })
 
     if (!response.ok) throw new Error('Network response was not ok')
 
     const reader = response.body.getReader()
     const decoder = new TextDecoder()
-    let aiContent = ''
-    
+    let streamContent = ''
+    let lastPayload = null
+
     while (true) {
       const { done, value } = await reader.read()
       if (done) break
-      
-      const chunk = decoder.decode(value, { stream: true })
-      const lines = chunk.split('\n')
-      
+
+      const text = decoder.decode(value, { stream: true })
+      const lines = text.split('\n')
+
       for (const line of lines) {
-        if (line.startsWith('data: ') && line !== 'data: [DONE]') {
-          const char = line.replace('data: ', '')
-          aiContent += char
-          aiMsg.content = aiContent
-          scrollToBottom()
+        if (!line.startsWith('data: ')) continue
+        const raw = line.replace(/^data: /, '').trim()
+        if (!raw) continue
+        try {
+          const event = JSON.parse(raw)
+          if (event.type === 'tool_call') {
+            aiMsg.toolName = event.toolName || ''
+            scrollToBottom()
+          } else if (event.type === 'tool_stream' && event.chunk != null) {
+            streamContent += event.chunk
+            aiMsg.content = streamContent
+            scrollToBottom()
+          } else if (event.type === 'tool_result' && event.payload) {
+            lastPayload = event.payload
+          } else if (event.type === 'error') {
+            aiMsg.content += '\n[错误] ' + (event.message || '')
+            aiMsg.streaming = false
+          } else if (event.type === 'done') {
+            aiMsg.streaming = false
+          }
+        } catch (_) {
+          // 非 JSON 行忽略
         }
       }
     }
-    
+
     aiMsg.streaming = false
-    try {
-      // Assuming final content is a valid JSON string
-      const newModel = JSON.parse(aiContent)
-      // Call API to save this new model
+    if (lastPayload && lastPayload.tableName) {
+      const newModel = {
+        name: lastPayload.displayName || lastPayload.tableName,
+        tableName: lastPayload.tableName,
+        description: lastPayload.description || '',
+        fields: lastPayload.fields || lastPayload.businessFields || []
+      }
       const saveRes = await fetch('/api/models', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newModel)
       })
-      if(saveRes.ok) {
+      if (saveRes.ok) {
         ElMessage.success('模型创建成功！')
-        fetchModels() // Refresh list
+        fetchModels()
         aiMsg.content = `模型【${newModel.name}】创建成功！`
+      } else {
+        aiMsg.content = streamContent || aiMsg.content || '[保存失败]'
       }
-    } catch (e) {
-      aiMsg.content += "\n[解析或保存失败]"
+    } else if (streamContent) {
+      try {
+        const parsed = JSON.parse(streamContent)
+        const newModel = {
+          name: parsed.displayName || parsed.tableName,
+          tableName: parsed.tableName,
+          description: parsed.description || '',
+          fields: parsed.fields || parsed.businessFields || []
+        }
+        const saveRes = await fetch('/api/models', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(newModel)
+        })
+        if (saveRes.ok) {
+          ElMessage.success('模型创建成功！')
+          fetchModels()
+          aiMsg.content = `模型【${newModel.name}】创建成功！`
+        } else {
+          aiMsg.content = streamContent
+        }
+      } catch (e) {
+        aiMsg.content = streamContent || '[解析或保存失败]'
+      }
+    } else {
+      aiMsg.content = aiMsg.content || '请求完成，无内容。'
     }
-    
   } catch (error) {
     console.error(error)
-    aiMsg.content = "生成失败，请重试。"
+    aiMsg.content = '生成失败，请重试。'
     aiMsg.streaming = false
   } finally {
     isGenerating.value = false
@@ -393,6 +442,12 @@ const sendQuery = async () => {
   justify-content: flex-end;
   margin-top: 8px;
 }
+.tool-tag {
+  font-size: 12px;
+  color: #909399;
+  margin-top: 4px;
+}
+
 .typing-indicator {
   display: inline-block;
   animation: blink 1s infinite;

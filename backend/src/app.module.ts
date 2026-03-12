@@ -6,9 +6,10 @@ import { ChatController } from './chat/chat.controller';
 import { ModelsController } from './models/models.controller';
 import { DatabaseModule } from './database/database.module';
 import { TableModule } from './table/table.module';
+import { AiModule } from './ai/ai.module';
 
 @Module({
-  imports: [ConfigModule.forRoot(), DatabaseModule, TableModule],
+  imports: [ConfigModule.forRoot(), DatabaseModule, TableModule, AiModule],
   controllers: [AppController, ChatController, ModelsController],
   providers: [AppService],
 })
