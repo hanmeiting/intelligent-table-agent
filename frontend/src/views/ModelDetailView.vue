@@ -2,14 +2,14 @@
   <div class="layout-container">
     <div :class="['main-content', { 'main-squeezed': isSidebarOpen }]">
       <div class="top-bar">
-        <div style="display: flex; align-items: center; gap: 10px;">
-          <el-button @click="router.push('/')" circle>
+        <div style="display: flex; align-items: center; gap: 15px;">
+          <el-button @click="router.push('/')" circle size="large" class="back-btn">
             <el-icon><Back /></el-icon>
           </el-button>
-          <h2>{{ currentModel?.name || '加载中...' }} 数据表</h2>
+          <h2 class="page-title">{{ currentModel?.name || '加载中...' }} <span class="subtitle">数据表</span></h2>
         </div>
-        <div style="display: flex; gap: 10px;">
-          <el-button type="success" @click="saveData" :loading="isSaving" :disabled="!hasUnsavedData">
+        <div style="display: flex; gap: 12px;">
+          <el-button type="success" plain @click="saveData" :loading="isSaving" :disabled="!hasUnsavedData">
             <el-icon><DocumentChecked /></el-icon> 保存数据
           </el-button>
           <el-button type="primary" @click="toggleSidebar" v-if="!isSidebarOpen">
@@ -18,7 +18,7 @@
         </div>
       </div>
       <div class="table-container">
-        <el-table :data="tableData" style="width: 100%" :row-class-name="tableRowClassName">
+        <el-table :data="tableData" style="width: 100%" :row-class-name="tableRowClassName" border stripe>
           <!-- 状态列 -->
           <el-table-column
             label="状态"
@@ -329,7 +329,7 @@ const sendQuery = async () => {
   height: 100vh;
   width: 100vw;
   overflow: hidden;
-  background-color: #f5f7fa;
+  background-color: #f0f2f5;
 }
 
 .sidebar {
@@ -401,7 +401,7 @@ const sendQuery = async () => {
   flex: 1;
   display: flex;
   flex-direction: column;
-  padding: 20px;
+  padding: 30px;
   transition: all 0.3s ease;
   min-width: 0;
 }
@@ -410,15 +410,36 @@ const sendQuery = async () => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 20px;
+  margin-bottom: 24px;
+  background: white;
+  padding: 16px 24px;
+  border-radius: 8px;
+  box-shadow: 0 2px 12px 0 rgba(0,0,0,0.02);
+}
+
+.page-title {
+  margin: 0;
+  font-size: 22px;
+  color: #303133;
+}
+
+.subtitle {
+  font-weight: normal;
+  color: #909399;
+  font-size: 16px;
+  margin-left: 8px;
+}
+
+.back-btn:hover {
+  background-color: #f4f4f5;
 }
 
 .table-container {
   flex: 1;
   background: white;
-  padding: 20px;
+  padding: 24px;
   border-radius: 8px;
-  box-shadow: 0 2px 12px 0 rgba(0,0,0,0.05);
+  box-shadow: 0 2px 12px 0 rgba(0,0,0,0.02);
   overflow: auto;
 }
 .message.user {

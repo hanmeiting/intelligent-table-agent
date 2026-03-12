@@ -1,30 +1,35 @@
 <template>
   <div class="home-container">
     <div class="header">
-      <h2>模型列表</h2>
-      <div>
-        <el-button type="success" @click="goToTableCreate" style="margin-right: 10px;">
+      <h2 class="page-title">模型列表</h2>
+      <div class="header-actions">
+        <el-button type="success" plain @click="goToTableCreate" class="action-btn">
           <el-icon><Menu /></el-icon> 智能建表 Agent
         </el-button>
-        <el-button type="primary" @click="toggleSidebar">
+        <el-button type="primary" plain @click="toggleSidebar" class="action-btn">
           <el-icon><ChatDotRound /></el-icon> AI 生成新模型
         </el-button>
       </div>
     </div>
     
     <div class="model-list">
-      <el-card v-for="model in modelList" :key="model.id" class="model-card" @click="goToDetail(model.tableName)">
+      <el-card v-for="model in modelList" :key="model.id" class="model-card" shadow="hover" @click="goToDetail(model.tableName)">
         <template #header>
           <div class="card-header">
-            <span>{{ model.name }}</span>
-            <el-tag size="small">{{ model.tableName }}</el-tag>
+            <span class="model-name">{{ model.name }}</span>
+            <el-tag size="small" type="info">{{ model.tableName }}</el-tag>
           </div>
         </template>
-        <div class="card-desc">{{ model.description }}</div>
+        <div class="card-desc">{{ model.description || '暂无描述' }}</div>
         <div class="card-footer">
-          <span>字段数: {{ model.fields.length }}</span>
+          <div class="field-count">字段数: <span class="count-num">{{ model.fields.length }}</span></div>
         </div>
       </el-card>
+      
+      <!-- Empty State -->
+      <div v-if="modelList.length === 0" class="empty-state">
+        <el-empty description="暂无模型，点击右上方按钮创建" />
+      </div>
     </div>
 
     <!-- Right Sidebar for AI Generation -->
@@ -186,11 +191,11 @@ const sendQuery = async () => {
 
 <style scoped>
 .home-container {
-  padding: 20px;
+  padding: 30px;
   position: relative;
   height: 100vh;
   box-sizing: border-box;
-  background-color: #f5f7fa;
+  background-color: #f0f2f5;
   overflow: hidden;
 }
 
@@ -198,25 +203,49 @@ const sendQuery = async () => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 20px;
+  margin-bottom: 30px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid #e4e7ed;
+}
+
+.page-title {
+  margin: 0;
+  font-size: 24px;
+  color: #303133;
+  font-weight: 600;
+}
+
+.action-btn {
+  margin-left: 12px;
 }
 
 .model-list {
   display: flex;
   flex-wrap: wrap;
-  gap: 20px;
-  height: calc(100vh - 100px);
+  gap: 24px;
+  height: calc(100vh - 130px);
   overflow-y: auto;
   align-content: flex-start;
+  padding-bottom: 40px;
+}
+
+.empty-state {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 60%;
 }
 
 .model-card {
-  width: 300px;
-  height: 160px;
+  width: 320px;
+  height: 180px;
   cursor: pointer;
-  transition: transform 0.2s;
+  transition: all 0.3s ease;
   display: flex;
   flex-direction: column;
+  border-radius: 8px;
+  border: none;
 }
 
 :deep(.el-card__body) {
@@ -224,34 +253,67 @@ const sendQuery = async () => {
   display: flex;
   flex-direction: column;
   justify-content: space-between;
+  padding: 20px;
+}
+
+:deep(.el-card__header) {
+  padding: 15px 20px;
+  background-color: #fafafa;
+  border-bottom: 1px solid #f0f0f0;
 }
 
 .model-card:hover {
-  transform: translateY(-5px);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+  transform: translateY(-4px);
+  box-shadow: 0 12px 24px rgba(0,0,0,0.08) !important;
 }
 
 .card-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-weight: bold;
+}
+
+.model-name {
+  font-weight: 600;
+  color: #303133;
+  font-size: 16px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 180px;
 }
 
 .card-desc {
   color: #606266;
   font-size: 14px;
+  line-height: 1.5;
   margin-bottom: 15px;
-  height: 40px;
+  height: 42px;
   overflow: hidden;
-  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
 }
 
 .card-footer {
-  font-size: 12px;
+  font-size: 13px;
   color: #909399;
-  border-top: 1px solid #ebeef5;
-  padding-top: 10px;
+  border-top: 1px dashed #ebeef5;
+  padding-top: 12px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.field-count {
+  display: flex;
+  align-items: center;
+}
+
+.count-num {
+  font-weight: 600;
+  color: #409eff;
+  margin-left: 4px;
+  font-size: 14px;
 }
 
 /* Sidebar Styles reused from App.vue */

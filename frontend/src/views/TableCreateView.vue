@@ -1,112 +1,139 @@
 <template>
   <div class="table-create-container">
-    <h2>🤖 智能建表 Agent</h2>
+    <div class="header-section">
+      <el-button @click="router.push('/')" circle class="back-btn">
+        <el-icon><Back /></el-icon>
+      </el-button>
+      <h2>🤖 智能建表 Agent</h2>
+    </div>
     
     <!-- 步骤一：输入自然语言 -->
-    <div class="step-card" v-if="step === 1">
-      <h3>第一步：告诉我想建什么表</h3>
-      <textarea 
+    <el-card class="step-card" shadow="hover" v-if="step === 1">
+      <template #header>
+        <div class="card-header">
+          <h3>第一步：告诉我想建什么表</h3>
+        </div>
+      </template>
+      <el-input 
         v-model="description" 
+        type="textarea"
         placeholder="例如：帮我创建一个员工表，包含基本信息..."
-        rows="4"
-      ></textarea>
-      <button :disabled="loading || !description.trim()" @click="generateSchema">
-        {{ loading ? '思考中...' : '生成表结构' }}
-      </button>
-      <div v-if="error" class="error-msg">{{ error }}</div>
-    </div>
+        :rows="6"
+        resize="none"
+      />
+      <div class="actions mt-4">
+        <el-button 
+          type="primary" 
+          size="large"
+          :loading="loading" 
+          :disabled="!description.trim()" 
+          @click="generateSchema"
+        >
+          {{ loading ? '思考中...' : '生成表结构' }}
+        </el-button>
+      </div>
+      <el-alert v-if="error" :title="error" type="error" show-icon class="mt-4" :closable="false" />
+    </el-card>
 
     <!-- 步骤二：确认表结构 -->
-    <div class="step-card" v-if="step >= 2">
-      <h3>第二步：确认表信息</h3>
+    <el-card class="step-card" shadow="hover" v-if="step >= 2">
+      <template #header>
+        <div class="card-header">
+          <h3>第二步：确认表信息</h3>
+        </div>
+      </template>
       
-      <div class="schema-info">
-        <div class="form-group">
-          <label>数据表名 (英文):</label>
-          <input type="text" v-model="schema.tableName" :disabled="step === 3" />
-        </div>
-        <div class="form-group">
-          <label>显示名称 (中文):</label>
-          <input type="text" v-model="schema.displayName" :disabled="step === 3" />
-        </div>
-        <div class="form-group">
-          <label>表描述:</label>
-          <input type="text" v-model="schema.description" :disabled="step === 3" />
-        </div>
+      <el-form label-width="140px" class="schema-form">
+        <el-form-item label="数据表名 (英文):">
+          <el-input v-model="schema.tableName" :disabled="step === 3" />
+        </el-form-item>
+        <el-form-item label="显示名称 (中文):">
+          <el-input v-model="schema.displayName" :disabled="step === 3" />
+        </el-form-item>
+        <el-form-item label="表描述:">
+          <el-input v-model="schema.description" :disabled="step === 3" />
+        </el-form-item>
+      </el-form>
+
+      <div class="table-section">
+        <h4>AI 推测的业务字段 (将存入 custom_data)</h4>
+        <el-table :data="schema.businessFields" border style="width: 100%" stripe>
+          <el-table-column prop="name" label="字段标识" width="180" />
+          <el-table-column prop="comment" label="显示名称" width="180" />
+          <el-table-column prop="control" label="控件类型">
+            <template #default="{ row }">
+              <el-tag type="info">{{ row.control }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="dataType" label="数据类型">
+            <template #default="{ row }">
+              <el-tag>{{ row.dataType }}</el-tag>
+            </template>
+          </el-table-column>
+          <template #empty>
+            <el-empty description="暂无推测字段" :image-size="60" />
+          </template>
+        </el-table>
       </div>
 
-      <h4>AI 推测的业务字段 (将存入 custom_data)</h4>
-      <table class="schema-table">
-        <thead>
-          <tr>
-            <th>字段标识</th>
-            <th>显示名称</th>
-            <th>控件类型</th>
-            <th>数据类型</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="(field, index) in schema.businessFields" :key="index">
-            <td>{{ field.name }}</td>
-            <td>{{ field.comment }}</td>
-            <td><span>{{ field.control }}</span></td>
-            <td><span class="tag tag-type">{{ field.dataType }}</span></td>
-          </tr>
-          <tr v-if="!schema.businessFields || schema.businessFields.length === 0">
-            <td colspan="3" style="text-align: center; color: #999;">暂无推测字段</td>
-          </tr>
-        </tbody>
-      </table>
+      <div class="table-section mt-4">
+        <h4>固定物理表字段结构</h4>
+        <el-table :data="schema.fields" border style="width: 100%" stripe>
+          <el-table-column prop="name" label="字段名" width="180" />
+          <el-table-column prop="type" label="类型" width="150" />
+          <el-table-column label="默认值/属性" width="200">
+            <template #default="{ row }">
+              <el-tag v-if="row.primaryKey" type="warning" effect="dark" class="mr-2">PK</el-tag>
+              <el-tag v-if="row.autoIncrement" type="success" effect="dark" class="mr-2">AI</el-tag>
+              <span v-if="row.defaultValue">{{ row.defaultValue }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="comment" label="说明" />
+        </el-table>
+      </div>
 
-      <h4>固定物理表字段结构</h4>
-      <table class="schema-table">
-        <thead>
-          <tr>
-            <th>字段名</th>
-            <th>类型</th>
-            <th>默认值/属性</th>
-            <th>说明</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="(field, index) in schema.fields" :key="index">
-            <td>{{ field.name }}</td>
-            <td>{{ field.type }}</td>
-            <td>
-              <span v-if="field.primaryKey" class="tag tag-pk">PK</span>
-              <span v-if="field.autoIncrement" class="tag">AI</span>
-              <span v-if="field.defaultValue">{{ field.defaultValue }}</span>
-            </td>
-            <td>{{ field.comment }}</td>
-          </tr>
-        </tbody>
-      </table>
-
-      <div class="actions" v-if="step === 2">
-        <button class="btn-secondary" @click="step = 1">返回修改</button>
-        <button :disabled="loading" @click="createTable">
+      <div class="actions mt-6" v-if="step === 2">
+        <el-button size="large" @click="step = 1">返回修改</el-button>
+        <el-button 
+          type="primary" 
+          size="large"
+          :loading="loading" 
+          @click="createTable"
+        >
           {{ loading ? '创建中...' : '确认创建并插入示例数据' }}
-        </button>
+        </el-button>
       </div>
-      <div v-if="error" class="error-msg">{{ error }}</div>
-    </div>
+      <el-alert v-if="error" :title="error" type="error" show-icon class="mt-4" :closable="false" />
+    </el-card>
 
     <!-- 步骤三：创建结果 -->
-    <div class="step-card success" v-if="step === 3">
-      <h3>🎉 创建成功</h3>
-      <div class="result-msg">
-        <p>{{ result.createMessage }}</p>
-        <p v-if="result.sampleDataInserted">{{ result.insertMessage }}</p>
-      </div>
-      <button @click="reset">继续创建新表</button>
-    </div>
+    <el-card class="step-card success-card" shadow="never" v-if="step === 3">
+      <el-result
+        icon="success"
+        title="🎉 创建成功"
+      >
+        <template #sub-title>
+          <div class="result-msg">
+            <p>{{ result.createMessage }}</p>
+            <p v-if="result.sampleDataInserted">{{ result.insertMessage }}</p>
+          </div>
+        </template>
+        <template #extra>
+          <el-button type="primary" size="large" @click="router.push('/')">返回首页</el-button>
+          <el-button size="large" @click="reset">继续创建新表</el-button>
+        </template>
+      </el-result>
+    </el-card>
 
   </div>
 </template>
 
 <script setup>
 import { ref } from 'vue';
+import { useRouter } from 'vue-router';
+import { Back } from '@element-plus/icons-vue';
 
+const router = useRouter();
 const step = ref(1);
 const loading = ref(false);
 const error = ref('');
@@ -171,141 +198,80 @@ const reset = () => {
 
 <style scoped>
 .table-create-container {
-  max-width: 800px;
+  max-width: 900px;
   margin: 0 auto;
-  padding: 20px;
+  padding: 40px 20px;
+  min-height: 100vh;
+  box-sizing: border-box;
+}
+
+.header-section {
+  display: flex;
+  align-items: center;
+  margin-bottom: 30px;
+}
+
+.back-btn {
+  margin-right: 15px;
+}
+
+.header-section h2 {
+  margin: 0;
+  font-size: 24px;
+  color: #303133;
 }
 
 .step-card {
-  background: #fff;
+  margin-bottom: 24px;
   border-radius: 8px;
-  padding: 24px;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
-  margin-bottom: 20px;
-  text-align: left;
 }
 
-.step-card h3 {
-  margin-top: 0;
-  border-bottom: 1px solid #eee;
-  padding-bottom: 10px;
-  color: #333;
-}
-
-textarea {
-  width: 100%;
-  padding: 12px;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-  margin-bottom: 16px;
-  font-family: inherit;
-  resize: vertical;
-}
-
-button {
-  background: #4CAF50;
-  color: white;
-  border: none;
-  padding: 10px 20px;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 16px;
-  transition: background 0.3s;
-}
-
-button:hover:not(:disabled) {
-  background: #45a049;
-}
-
-button:disabled {
-  background: #ccc;
-  cursor: not-allowed;
-}
-
-.btn-secondary {
-  background: #f0f0f0;
-  color: #333;
-  margin-right: 12px;
-}
-.btn-secondary:hover:not(:disabled) {
-  background: #e0e0e0;
-}
-
-.form-group {
-  margin-bottom: 12px;
-  display: flex;
-  align-items: center;
-}
-
-.form-group label {
-  width: 140px;
-  font-weight: bold;
-  color: #555;
-}
-
-.form-group input {
-  flex: 1;
-  padding: 8px;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-}
-
-.schema-table {
-  width: 100%;
-  border-collapse: collapse;
-  margin: 16px 0;
-}
-
-.schema-table th, .schema-table td {
-  border: 1px solid #ddd;
-  padding: 10px;
-  text-align: left;
-}
-
-.schema-table th {
-  background: #f5f5f5;
-  color: #333;
-}
-
-.tag {
-  display: inline-block;
-  padding: 2px 6px;
-  border-radius: 4px;
-  font-size: 12px;
-  background: #eee;
-  margin-right: 4px;
-}
-
-.tag-pk {
-  background: #ffecb3;
-  color: #f57c00;
-  font-weight: bold;
-}
-
-.tag-type {
-  background: #e3f2fd;
-  color: #1976d2;
+.card-header h3 {
+  margin: 0;
+  font-size: 18px;
+  color: #303133;
 }
 
 .actions {
-  margin-top: 20px;
   display: flex;
   justify-content: flex-end;
 }
 
-.error-msg {
-  color: #f44336;
-  margin-top: 10px;
-  padding: 10px;
-  background: #ffebee;
-  border-radius: 4px;
+.mt-4 {
+  margin-top: 16px;
+}
+
+.mt-6 {
+  margin-top: 24px;
+}
+
+.mr-2 {
+  margin-right: 8px;
+}
+
+.schema-form {
+  max-width: 600px;
+  margin-bottom: 30px;
+}
+
+.table-section h4 {
+  margin-top: 0;
+  margin-bottom: 16px;
+  color: #606266;
+  font-size: 16px;
+}
+
+.success-card {
+  background-color: #f0f9eb;
+  border-color: #e1f3d8;
 }
 
 .result-msg {
-  background: #e8f5e9;
-  padding: 16px;
-  border-radius: 4px;
-  color: #2e7d32;
-  margin-bottom: 20px;
+  color: #606266;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.result-msg p {
+  margin: 5px 0;
 }
 </style>
