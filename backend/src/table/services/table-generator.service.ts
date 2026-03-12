@@ -2,7 +2,17 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ChatOpenAI } from '@langchain/openai';
 import { StringOutputParser } from '@langchain/core/output_parsers';
 import { PromptTemplate } from '@langchain/core/prompts';
-
+const controls = {
+  "rx-input": '单行文本',
+  "rx-radio": '单选框',
+  "rx-textarea": '单行文本',
+  "rx-checkbox-list": '复选框',
+  "rx-form-select": '下拉框',
+  "rx-date": '日期',
+  "rx-time": '时间',
+  "rx-number": '数字',
+  "rx-switch": '开关'
+}
 @Injectable()
 export class TableGeneratorService {
   private readonly logger = new Logger(TableGeneratorService.name);
@@ -44,7 +54,7 @@ export class TableGeneratorService {
         "      \"dataType\": \"前端字段类型(clob/varchar/number/date等)\",\n" +
         "      \"length\": \"字段长度(如：255，可为null)\",\n" +
         "      \"decimalLength\": \"小数位数(可为null)\",\n" +
-        "      \"control\": \"控件类型(如：rx-textarea/rx-input/rx-date)\",\n" +
+        "      \"control\": \"控件类型,必须从{controls}中选择\",\n" +
         "      \"isSingle\": 1,\n" +
         "      \"publishStatus\": \"DEPLOYED\",\n" +
         "      \"extJson\": \"\"\n" +
@@ -56,10 +66,10 @@ export class TableGeneratorService {
       );
 
       const chain = prompt.pipe(model).pipe(new StringOutputParser());
-      const result = await chain.invoke({ userInput: description });
-      
+      const result = await chain.invoke({ userInput: description, controls: JSON.stringify(controls) });
+
       const parsedResult = JSON.parse(result.trim());
-      
+
       const businessFields = (parsedResult.businessFields || []).map((f: any) => ({
         ...f,
         isSystem: false,
@@ -68,7 +78,7 @@ export class TableGeneratorService {
 
       // Combine fixed schema and business fields to form the full table schema
       const allFields = [...this.fixedSchemaTemplate, ...businessFields];
-      
+
       return {
         ...parsedResult,
         businessFields,
@@ -79,10 +89,10 @@ export class TableGeneratorService {
       this.logger.error('Failed to generate table schema from LLM', error);
       // 降级处理
       const fallbackBusinessFields = [
-        { 
-          name: 'name', 
-          fieldName: 'F_name', 
-          comment: '名称', 
+        {
+          name: 'name',
+          fieldName: 'F_name',
+          comment: '名称',
           type: 'VARCHAR',
           dataType: 'varchar',
           length: 255,
@@ -90,7 +100,7 @@ export class TableGeneratorService {
           isSystem: false
         }
       ];
-      
+
       return {
         tableName: 'dynamic_table_' + Date.now(),
         displayName: '自定义表',

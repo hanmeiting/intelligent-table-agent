@@ -4,7 +4,7 @@ import { ChatOpenAI } from '@langchain/openai';
 import { StringOutputParser } from '@langchain/core/output_parsers';
 import { PromptTemplate } from '@langchain/core/prompts';
 import { DatabaseService } from '../database/database.service';
-
+// import { controls } from '../data/control-type.js'
 @Controller('api/chat')
 export class ChatController {
   constructor(private readonly databaseService: DatabaseService) {}
@@ -44,8 +44,17 @@ export class ChatController {
     }
 
     const fieldStr = fields.map((f: any) => `${f.prop} (${f.label}, ${f.type})`).join(', ');
-    console.log('fieldStr---fieldStr---fieldStr---fieldStr---fieldStr::::::', fieldStr)
-
+    const controls = {
+        "rx-input": '单行文本',
+        "rx-radio": '单选框',
+        "rx-textarea": '单行文本',
+        "rx-checkbox-list": '复选框',
+        "rx-form-select": '下拉框',
+        "rx-date": '日期',
+        "rx-time": '时间',
+        "rx-number": '数字',
+        "rx-switch": '开关'
+    }
     try {
       const model = new ChatOpenAI({
         openAIApiKey: apiKey,
@@ -60,6 +69,7 @@ export class ChatController {
         "1. 必须直接输出JSON对象，不能包含任何多余的解释文本。\n" +
         "2. 绝对不能使用Markdown语法（绝对不要有 ```json 等代码块标记），输出的首字符必须是 '{{'。\n" +
         "3. 强制包含以下字段：{fieldStr}。\n\n" +
+        "4. 字段 control 的值 **必须** 严格从 {controls} 中选择。\n\n" +
         "用户描述：{userInput}\n" +
         "结果："
       );
@@ -68,6 +78,7 @@ export class ChatController {
 
       const stream = await chain.stream({
         fieldStr: fieldStr || "任意字段",
+        controls: JSON.stringify(controls),
         userInput: userMessage,
       });
       console.log(`LLM 请求成功，开始推流。`)
