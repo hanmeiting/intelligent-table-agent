@@ -8,12 +8,29 @@
           </el-button>
           <h2>{{ currentModel?.name || '加载中...' }} 数据表</h2>
         </div>
-        <el-button type="primary" @click="toggleSidebar" v-if="!isSidebarOpen">
-          <el-icon><ChatDotRound /></el-icon> 唤起 AI 助手
-        </el-button>
+        <div style="display: flex; gap: 10px;">
+          <el-button type="success" @click="saveData" :loading="isSaving" :disabled="!hasUnsavedData">
+            <el-icon><DocumentChecked /></el-icon> 保存数据
+          </el-button>
+          <el-button type="primary" @click="toggleSidebar" v-if="!isSidebarOpen">
+            <el-icon><ChatDotRound /></el-icon> 唤起 AI 助手
+          </el-button>
+        </div>
       </div>
       <div class="table-container">
         <el-table :data="tableData" style="width: 100%" :row-class-name="tableRowClassName">
+          <!-- 状态列 -->
+          <el-table-column
+            label="状态"
+            width="100"
+            align="center"
+          >
+            <template #default="{ row }">
+              <el-tag v-if="row.saved" type="success" size="small">已保存</el-tag>
+              <el-tag v-else-if="row.isGenerating" type="warning" size="small">生成中</el-tag>
+              <el-tag v-else type="info" size="small">未保存</el-tag>
+            </template>
+          </el-table-column>
           <!-- 动态渲染列 -->
           <el-table-column
             v-for="field in tableColumns"
@@ -72,9 +89,9 @@
 </template>
 
 <script setup>
-import { ref, onMounted, nextTick } from 'vue'
+import { ref, onMounted, nextTick, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { Close, ChatDotRound, Picture, Back } from '@element-plus/icons-vue'
+import { Close, ChatDotRound, Picture, Back, DocumentChecked } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 
 const router = useRouter()
@@ -84,6 +101,7 @@ const props = defineProps(['id'])
 const isSidebarOpen = ref(false)
 const inputText = ref('')
 const isGenerating = ref(false)
+const isSaving = ref(false)
 const messages = ref([])
 const messagesRef = ref(null)
 const tableColumns = ref([
@@ -98,7 +116,7 @@ const tableColumns = ref([
     align: 'center'
   },
   {
-    prop: 'dataType',
+    prop: 'data_type',
     label: '类型',
     align: 'center'
   },
@@ -109,15 +127,89 @@ const tableColumns = ref([
   }
 ])
 
+const hasUnsavedData = computed(() => {
+  return tableData.value.some(row => !row.saved && !row.isGenerating)
+})
+
+const saveData = async () => {
+  if (!currentModel.value || !tableData.value.length || isSaving.value || !hasUnsavedData.value) return
+  
+  isSaving.value = true
+  
+  try {
+    // 过滤出未保存的数据
+    const unsavedData = tableData.value
+      .filter(row => !row.saved && !row.isGenerating)
+      .map(row => {
+        // 创建副本并删除 id 字段（如果存在）
+        const rowCopy = { ...row }
+        delete rowCopy.id
+        delete rowCopy.isGenerating
+        delete rowCopy.saved
+        return rowCopy
+      })
+    
+    if (unsavedData.length === 0) {
+      ElMessage.info('没有需要保存的数据')
+      return
+    }
+    
+    // 调用保存接口
+    const response = await fetch(`/api/table/save/${currentModel.value.tableName}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ data: unsavedData })
+    })
+    
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`)
+    }
+    
+    const result = await response.json()
+    
+    if (result.success) {
+      // 更新已保存的数据标记
+      const savedIds = result.data.savedIds || []
+      
+      // 找到对应的行并标记为已保存
+      tableData.value.forEach(row => {
+        // 通过字段值匹配来确定哪些行被保存了
+        // 由于没有返回行ID，我们通过数据内容匹配
+        const unsavedRow = unsavedData.find(unsaved => {
+          // 比较所有字段（除了id）
+          return Object.keys(unsaved).every(key => {
+            return row[key] === unsaved[key]
+          })
+        })
+        
+        if (unsavedRow) {
+          row.saved = true
+        }
+      })
+      
+      ElMessage.success(`成功保存 ${result.data.savedCount} 条数据`)
+    } else {
+      throw new Error(result.message || '保存失败')
+    }
+  } catch (error) {
+    console.error('保存失败:', error)
+    ElMessage.error(`保存失败: ${error.message}`)
+  } finally {
+    isSaving.value = false
+  }
+} 
+
 const currentModel = ref(null)
 const tableData = ref([])
 
 onMounted(async () => {
   try {
-    const res = await fetch(`/api/models/${route.params.id}`)
-    const data = await res.json()
-    currentModel.value = data
-    tableData.value = data.fields.filter((item) => !item.isSystem) // 初始化空数据
+    const res = await fetch(`/api/table/detail/${route.params.id}`)
+    const response = await res.json()
+    currentModel.value = response.data
+    tableData.value = response.data.fields.filter((item) => !item.isSystem) // 初始化空数据
   } catch (e) {
     console.error(e)
   }
@@ -201,11 +293,17 @@ const sendQuery = async () => {
     }
     
     aiMsg.streaming = false
+    console.log('aiMsg.content::::', aiMsg.content, tableData.value[0])
     try {
       const finalData = JSON.parse(aiContent)
-      currentModel.value.fields.forEach(f => {
-         tableData.value[0][f.prop] = finalData[f.prop] || ''
-      })
+      // tableData.value.push(finalData)
+      // currentModel.value.fields.forEach(f => {
+      //    tableData.value[0][f.prop] = finalData[f.prop] || ''
+      // })
+      finalData.saved = false;
+      for(let key in finalData) {
+        tableData.value[0][key] = finalData[key]
+      }
       delete tableData.value[0].isGenerating
       aiMsg.content = "已为您生成以下数据:\n" + JSON.stringify(finalData, null, 2)
       ElMessage.success('数据生成完毕！')

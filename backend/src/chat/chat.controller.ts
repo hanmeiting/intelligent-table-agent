@@ -3,17 +3,12 @@ import type { Response } from 'express';
 import { ChatOpenAI } from '@langchain/openai';
 import { StringOutputParser } from '@langchain/core/output_parsers';
 import { PromptTemplate } from '@langchain/core/prompts';
-
-// We fetch model fields dynamically based on modelId
-// In a real app this would be a database call
-const fetchModelFields = async (modelId: string) => {
-  const res = await fetch(`http://localhost:3000/api/models/${modelId}`);
-  const data = await res.json();
-  return data.fields || [];
-};
+import { DatabaseService } from '../database/database.service';
 
 @Controller('api/chat')
 export class ChatController {
+  constructor(private readonly databaseService: DatabaseService) {}
+
   @Post('stream')
   async streamChat(@Body() body: any, @Res() res: Response) {
     res.setHeader('Content-Type', 'text/event-stream');
@@ -24,18 +19,32 @@ export class ChatController {
     const userMessage = messages[messages.length - 1]?.content || '生成一条数据';
     const modelId = body.modelId;
 
-    const apiKey = process.env.OPENAI_API_KEY || 'sk-placeholder';
-    const baseUrl = process.env.OPENAI_BASE_URL; // e.g. https://api.openai.com/v1
-    const modelName = process.env.MODEL_NAME || 'gpt-3.5-turbo';
+    const apiKey = process.env.OPENAI_API_KEY;
+    const baseUrl = process.env.OPENAI_BASE_URL;
+    const modelName = process.env.MODEL_NAME;
 
     let fields = [];
     if (modelId) {
       try {
-        fields = await fetchModelFields(modelId);
-      } catch(e) {}
+        const tableName = modelId.replace(/`/g, '``');
+        const columns = await this.databaseService.query(`SHOW FULL COLUMNS FROM \`${tableName}\``);
+        // Exclude auto-increment ID field if desired, or keep it.
+        // Usually, we don't want AI to generate the auto-increment ID.
+        const excludedFields = ['id', 'create_time', 'create_by', 'create_dep_id', 'update_time', 'update_by', 'tenant_id', 'ent_id', 'pk_id'];
+        const filteredColumns = columns.filter((col: any) => col.Extra !== 'auto_increment' && !excludedFields.includes(col.Field));
+        
+        fields = filteredColumns.map((col: any) => ({
+          prop: col.Field,
+          label: col.Comment || col.Field,
+          type: col.Type
+        }));
+      } catch(e) {
+        console.warn(`Failed to fetch table structure for ${modelId}`, e.message);
+      }
     }
 
     const fieldStr = fields.map((f: any) => `${f.prop} (${f.label}, ${f.type})`).join(', ');
+    console.log('fieldStr---fieldStr---fieldStr---fieldStr---fieldStr::::::', fieldStr)
 
     try {
       const model = new ChatOpenAI({
@@ -46,8 +55,11 @@ export class ChatController {
       });
 
       const prompt = PromptTemplate.fromTemplate(
-        "你是一个专业的数据生成Agent。请根据用户的描述，生成一个严格的JSON格式数据，不要使用Markdown代码块（如```json），只输出原始的JSON字符串。\n" +
-        "强制包含以下字段：{fieldStr}。\n\n" +
+        "你是一个专业的数据生成Agent。请根据用户的描述，生成一个严格的JSON格式数据。\n" +
+        "【重要约束】\n" +
+        "1. 必须直接输出JSON对象，不能包含任何多余的解释文本。\n" +
+        "2. 绝对不能使用Markdown语法（绝对不要有 ```json 等代码块标记），输出的首字符必须是 '{{'。\n" +
+        "3. 强制包含以下字段：{fieldStr}。\n\n" +
         "用户描述：{userInput}\n" +
         "结果："
       );
@@ -58,12 +70,20 @@ export class ChatController {
         fieldStr: fieldStr || "任意字段",
         userInput: userMessage,
       });
-
+      console.log(`LLM 请求成功，开始推流。`)
       for await (const chunk of stream) {
-        // 直接将 AI 生成的字符推流到前端
-        res.write(`data: ${chunk}\n\n`);
+        // SSE要求每一行都必须以"data: "开头。
+        // 如果 chunk 中包含换行符，会导致后续行丢失前缀，从而破坏前端 JSON 解析。
+        // 所以在这里我们将多行切分，或者直接移除换行符。
+        const lines = chunk.split('\n');
+        for (const line of lines) {
+          if (line !== undefined && line !== null) {
+            // 将单字符或多字符分行推送，消除回车换行问题
+            res.write(`data: ${line}\n`);
+          }
+        }
+        res.write('\n');
       }
-
       res.write(`data: [DONE]\n\n`);
       res.end();
     } catch (e) {
