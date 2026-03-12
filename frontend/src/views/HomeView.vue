@@ -1,0 +1,344 @@
+<template>
+  <div class="home-container">
+    <div class="header">
+      <h2>模型列表</h2>
+      <div>
+        <el-button type="success" @click="goToTableCreate" style="margin-right: 10px;">
+          <el-icon><Menu /></el-icon> 智能建表 Agent
+        </el-button>
+        <el-button type="primary" @click="toggleSidebar">
+          <el-icon><ChatDotRound /></el-icon> AI 生成新模型
+        </el-button>
+      </div>
+    </div>
+    
+    <div class="model-list">
+      <el-card v-for="model in modelList" :key="model.id" class="model-card" @click="goToDetail(model.tableName)">
+        <template #header>
+          <div class="card-header">
+            <span>{{ model.name }}</span>
+            <el-tag size="small">{{ model.tableName }}</el-tag>
+          </div>
+        </template>
+        <div class="card-desc">{{ model.description }}</div>
+        <div class="card-footer">
+          <span>字段数: {{ model.fields.length }}</span>
+        </div>
+      </el-card>
+    </div>
+
+    <!-- Right Sidebar for AI Generation -->
+    <div :class="['sidebar', { 'sidebar-open': isSidebarOpen }]">
+      <div class="sidebar-header">
+        <h3>智能模型生成 Agent</h3>
+        <el-button @click="toggleSidebar" circle size="small">
+          <el-icon><Close /></el-icon>
+        </el-button>
+      </div>
+      <div class="chat-container">
+        <div class="messages" ref="messagesRef">
+           <div class="message ai">
+              您好，请告诉我您想创建什么样的数据模型？例如：“创建一个员工表，包含姓名、年龄、入职时间”。
+           </div>
+           <div v-for="(msg, index) in messages" :key="index" :class="['message', msg.role]">
+             <pre v-if="msg.role === 'ai'" style="white-space: pre-wrap; font-family: inherit; margin: 0;">{{ msg.content }}</pre>
+             <span v-else>{{ msg.content }}</span>
+             <div v-if="msg.streaming" class="typing-indicator">...</div>
+           </div>
+        </div>
+        <div class="input-area">
+          <el-input 
+            v-model="inputText" 
+            type="textarea" 
+            :rows="3" 
+            placeholder="输入自然语言描述..." 
+            resize="none"
+            @keyup.enter.prevent="sendQuery"
+            :disabled="isGenerating"
+          />
+          <div class="input-actions">
+            <el-button type="primary" size="small" @click="sendQuery" :loading="isGenerating">生成</el-button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { ref, onMounted, nextTick } from 'vue'
+import { useRouter } from 'vue-router'
+import { Close, ChatDotRound, Menu } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
+
+const router = useRouter()
+const modelList = ref([])
+
+const isSidebarOpen = ref(false)
+const inputText = ref('')
+const isGenerating = ref(false)
+const messages = ref([])
+const messagesRef = ref(null)
+
+const toggleSidebar = () => {
+  isSidebarOpen.value = !isSidebarOpen.value
+}
+
+const fetchModels = async () => {
+  try {
+    const res = await fetch('/api/models')
+    const data = await res.json()
+    modelList.value = data
+  } catch (error) {
+    console.error('Failed to fetch models', error)
+  }
+}
+
+onMounted(() => {
+  fetchModels()
+})
+
+const goToDetail = (id) => {
+  router.push(`/model/${id}`)
+}
+
+const goToTableCreate = () => {
+  router.push('/table-create')
+}
+
+const scrollToBottom = async () => {
+  await nextTick()
+  if (messagesRef.value) {
+    messagesRef.value.scrollTop = messagesRef.value.scrollHeight
+  }
+}
+
+const sendQuery = async () => {
+  if (!inputText.value.trim() || isGenerating.value) return
+  
+  const userText = inputText.value
+  messages.value.push({ role: 'user', content: userText })
+  inputText.value = ''
+  isGenerating.value = true
+  
+  const aiMsg = { role: 'ai', content: '', streaming: true }
+  messages.value.push(aiMsg)
+  scrollToBottom()
+
+  try {
+    const response = await fetch('/api/models/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ description: userText })
+    })
+
+    if (!response.ok) throw new Error('Network response was not ok')
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let aiContent = ''
+    
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      
+      const chunk = decoder.decode(value, { stream: true })
+      const lines = chunk.split('\n')
+      
+      for (const line of lines) {
+        if (line.startsWith('data: ') && line !== 'data: [DONE]') {
+          const char = line.replace('data: ', '')
+          aiContent += char
+          aiMsg.content = aiContent
+          scrollToBottom()
+        }
+      }
+    }
+    
+    aiMsg.streaming = false
+    try {
+      // Assuming final content is a valid JSON string
+      const newModel = JSON.parse(aiContent)
+      // Call API to save this new model
+      const saveRes = await fetch('/api/models', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newModel)
+      })
+      if(saveRes.ok) {
+        ElMessage.success('模型创建成功！')
+        fetchModels() // Refresh list
+        aiMsg.content = `模型【${newModel.name}】创建成功！`
+      }
+    } catch (e) {
+      aiMsg.content += "\n[解析或保存失败]"
+    }
+    
+  } catch (error) {
+    console.error(error)
+    aiMsg.content = "生成失败，请重试。"
+    aiMsg.streaming = false
+  } finally {
+    isGenerating.value = false
+  }
+}
+</script>
+
+<style scoped>
+.home-container {
+  padding: 20px;
+  position: relative;
+  height: 100vh;
+  box-sizing: border-box;
+  background-color: #f5f7fa;
+  overflow: hidden;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.model-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  height: calc(100vh - 100px);
+  overflow-y: auto;
+  align-content: flex-start;
+}
+
+.model-card {
+  width: 300px;
+  height: 160px;
+  cursor: pointer;
+  transition: transform 0.2s;
+  display: flex;
+  flex-direction: column;
+}
+
+:deep(.el-card__body) {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.model-card:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: bold;
+}
+
+.card-desc {
+  color: #606266;
+  font-size: 14px;
+  margin-bottom: 15px;
+  height: 40px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.card-footer {
+  font-size: 12px;
+  color: #909399;
+  border-top: 1px solid #ebeef5;
+  padding-top: 10px;
+}
+
+/* Sidebar Styles reused from App.vue */
+.sidebar {
+  position: absolute;
+  right: 0;
+  top: 0;
+  height: 100%;
+  width: 0;
+  background: white;
+  border-left: 1px solid #dcdfe6;
+  transition: width 0.3s ease;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: -2px 0 8px rgba(0,0,0,0.05);
+  z-index: 1000;
+}
+
+.sidebar-open {
+  width: 400px;
+}
+
+.sidebar-header {
+  padding: 16px;
+  border-bottom: 1px solid #ebeef5;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.chat-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.messages {
+  flex: 1;
+  padding: 16px;
+  overflow-y: auto;
+}
+
+.message {
+  margin-bottom: 16px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  max-width: 80%;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.message.ai {
+  background-color: #f4f4f5;
+  color: #303133;
+  align-self: flex-start;
+  border-bottom-left-radius: 2px;
+}
+
+.message.user {
+  background-color: #409eff;
+  color: white;
+  align-self: flex-end;
+  border-bottom-right-radius: 2px;
+  margin-left: auto;
+}
+
+.input-area {
+  padding: 16px;
+  border-top: 1px solid #ebeef5;
+}
+
+.input-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+.typing-indicator {
+  display: inline-block;
+  animation: blink 1s infinite;
+}
+
+@keyframes blink {
+  0% { opacity: .2; }
+  20% { opacity: 1; }
+  100% { opacity: .2; }
+}
+</style>
